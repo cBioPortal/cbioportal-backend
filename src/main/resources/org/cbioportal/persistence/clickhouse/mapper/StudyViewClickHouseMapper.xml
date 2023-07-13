@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.cbioportal.persistence.clickhouse.mapper.StudyViewClickHouseMapper">
+	<select id="getMutatedGenes" resultType="org.cbioportal.model.AlterationCountByGene">
+		SELECT
+            hugo_gene_symbol as hugoGeneSymbol,
+            1 as entrezGeneId,
+            -- TODO incorporate logic on gene panels to assess the number of profiled cases.
+            COUNT(DISTINCT sample_unique_id) as numberOfProfiledCases,
+            COUNT(DISTINCT sample_unique_id) as numberOfAlteredCases,
+            COUNT(*) as totalCount
+        FROM mutation
+        WHERE sample_unique_id IN (
+            <include refid="sampleUniqueIdsFromStudyViewFilter" />
+        )
+        GROUP BY hugo_gene_symbol
+        ORDER BY totalCount DESC;
+	</select>
+	<sql id="sampleUniqueIdsFromStudyViewFilter">
+        <trim prefixOverrides="INTERSECT">
+            <if test="studyIds != null and !studyIds.isEmpty()">
+                INTERSECT
+                SELECT sample_unique_id
+                FROM sample
+                WHERE cancer_study_identifier IN
+                <foreach item="studyId" collection="studyIds" open="(" separator="," close=")">
+                	#{studyId}
+                </foreach>
+            </if>
+            <if test="sampleIdentifiers != null and !sampleIdentifiers.isEmpty()">
+                INTERSECT
+                SELECT sample_unique_id
+                FROM sample
+                WHERE sample_unique_id IN
+                <foreach item="sampleIdentifier" collection="sampleIdentifiers" open="(" separator="," close=")">
+                    #{sampleIdentifier.getStudyId()}_#{sampleIdentifier.getSampleId()}
+                </foreach>
+            </if>
+            <if test="geneFilters != null and !geneFilters.isEmpty()">
+                INTERSECT
+                SELECT sample_unique_id
+                FROM genomic_event
+                <where>
+                    <trim prefixOverrides="OR">
+                        <foreach item="profileGroup" collection="geneFilters" open="OR (" separator="," close=")">
+                            genetic_profile_stable_id IN
+                            <foreach item="molecularProfileId" collection="profileGroup.getMolecularProfileIds()" open="(" separator="," close=")">
+                                #{molecularProfileId}
+                            </foreach>
+                            AND hugo_gene_symbol IN
+                            <foreach item="geneFilterQueryList" collection="profileGroup.getGeneQueries()">
+                                <foreach item="geneFilterQuery" collection="geneFilterQueryList" open="(" separator="," close=")">
+                                    #{geneFilterQuery.hugoGeneSymbol}
+                                </foreach>
+                            </foreach>
+                        </foreach>
+                    </trim>
+                </where>
+            </if>
+             <if test="clinicalDataFilters != null and !clinicalDataFilters.isEmpty()">
+                <foreach item="clinicalDataFilter" collection="clinicalDataFilters" open="INTERSECT" separator="INTERSECT">
+                    SELECT sample_unique_id
+                    FROM sample_clinical_attribute_numeric
+                    WHERE attribute_name = '${clinicalDataFilter.attributeId}'
+                    <foreach item="dataFilterValue" collection="clinicalDataFilter.values" open=" AND ((" separator=") OR (" close="))">
+                        <trim prefix="" prefixOverrides="AND">
+                            <if test="dataFilterValue.value eq 'NA'">
+                                AND attribute_value = -1000000
+                            </if>
+                            <if test="dataFilterValue.start != null">
+                                AND attribute_value &gt; ${dataFilterValue.start}
+                            </if>
+                            <if test="dataFilterValue.end != null">
+                                AND attribute_value &lt;= ${dataFilterValue.end}
+                            </if>
+                        </trim>
+                    </foreach>
+                </foreach>
+            </if>
+            <!-- ... extend for other elements of the StudyViewFilter object -->
+        </trim>
+    </sql>
+
+</mapper>
