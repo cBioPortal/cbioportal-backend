@@ -1,3 +1,5 @@
+#### ℹ️ Note: This is an attempt at repackaging the cBioPortal backend into a more modern java app but is not used yet in production
+
 # cbioportal-backend
 
 ## Services needed
